@@ -1,0 +1,39 @@
+[MASTER]
+# Add the project directory to Python path
+ignore=CVS
+
+[FORMAT]
+# Maximum number of characters on a single line
+max-line-length=120
+
+[MESSAGES CONTROL]
+# Disable specific warnings
+disable=
+    C0111,  # missing-docstring
+    C0103,  # invalid-name
+    R0903,  # too-few-public-methods
+    W0511,  # fixme
+    R0913,  # too-many-arguments
+    R0914,  # too-many-locals
+    W0621,  # redefined-outer-name
+    C0301,  # line-too-long (we use black/flake8 for this)
+    C0302,  # too-many-lines
+    C0114,  # missing-module-docstring (redundant with sphinx docs)
+    C0115,  # missing-class-docstring (redundant with sphinx docs)
+    C0116,  # missing-function-docstring (redundant with sphinx docs)
+
+[REPORTS]
+# Set the output format
+output-format=text
+# Include a brief explanation of each error
+msg-template={path}:{line}: [{msg_id}({symbol}), {obj}] {msg}
+
+[BASIC]
+# Regular expression which should only match function or class names
+good-names=i,j,k,ex,Run,_,x,y,z,w,n,m,f,g,h
+
+[SIMILARITIES]
+# Minimum lines number of a similarity
+min-similarity-lines=7
+# Ignore imports when computing similarities
+ignore-imports=yes 
