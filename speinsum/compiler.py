@@ -5,6 +5,7 @@ Core compiler implementation for sparse einsum operations.
 from typing import List, Tuple
 import torch
 from .sparse_tensor import SparseTensor
+from .typing import DimensionFormat, Dimension
 
 
 def parse_einsum_equation(equation: str) -> Tuple[List[str], str]:
@@ -48,28 +49,106 @@ def parse_einsum_equation(equation: str) -> Tuple[List[str], str]:
     return input_subscripts, output.strip()
 
 
-def _coalesce_einsum_indices(
-    input_eqn: str, input: SparseTensor
-) -> Tuple[str, SparseTensor]:
+def _select_along_dim(tensor: torch.Tensor, dim: int, index: torch.Tensor) -> torch.Tensor:
+    """Select along a dimension of a tensor such that the output tensor has exactly one
+    fewer dimensions than the input tensor, removing the dimension dim.
+
+    Values are selected with respect to the first dimension of the input tensor.
+
+    The output tensor is obtained by
+    output[i_0, ..., i_{dim-1}, i_{dim+1}, ..., i_{n-1}]
+       = input[i_0, ..., i_{dim-1}, index[i_0], i_{dim+1}, ..., i_{n-1}]
+
+    Args:
+        tensor: Input tensor
+        dim: Dimension to select along
+        index: Indices to select
+
+    Returns:
+        Output tensor
+    """
+    selected = torch.index_select(tensor, dim=dim, index=index)
+    diag = torch.diagonal(selected, dim1=0, dim2=dim)  # torch diagonal places diagonal along final dimension
+    perm = [diag.ndim - 1] + list(range(0, diag.ndim - 1))  # Rotate back to original order
+    return diag.permute(perm)
+
+
+def _coalesce_einsum_indices(input_eqn: str, tensor: SparseTensor) -> Tuple[str, SparseTensor]:
     """Coalesce repeated indices of a tensor input in some einsum equation
     into an equivalent einsum equation and sparse tensor.
 
     Args:
         input_eqn: Einsum equation for the input tensor
-        input: Input tensor
+        tensor: Input tensor
 
     Returns:
         Tuple of (einsum equation, coalesced tensor)
     """
-    seen_indices = set()
-    for index in input_eqn:
-        if index in seen_indices:
-            # Coalesce repeated indices by taking diagonal.
-            ...
-        else:
-            ...
+    dense_dims = [d for d in range(tensor.ndim) if tensor.dimension_format[d] == DimensionFormat.DENSE]
+    sparse_dims = [d for d in range(tensor.ndim) if tensor.dimension_format[d] == DimensionFormat.SPARSE]
 
-        seen_indices.add(index)
+    # Diagonalize repeated indices in dense dimensions using einsum to combine them
+    # Map dense dimensions to their corresponding labels from input equation
+    value_labels = ["@"] * tensor.values.ndim  # @ for nnz axis. TODO: throw error if @ is in input_eqn
+    for d in dense_dims:
+        value_labels[tensor.get_storage_index(d)] = input_eqn[d]
+    # Get unique labels to remove duplicates
+    dense_indices = ["@"] + list(set(value_labels[1:]))  # Keep @ as first index
+    # Build einsum equation to diagonalize repeated indices
+    diagonalize_einsum = f"{''.join(value_labels)}->{''.join(dense_indices)}"
+    # Apply einsum to get values with diagonalized dimensions
+    new_values = torch.einsum(diagonalize_einsum, tensor.values)
+
+    # Mark repeated sparse dimensions to coalesce them
+    sparse_coalesce_indices = {}
+    for d in sparse_dims:
+        index = input_eqn[d]
+        if index not in sparse_coalesce_indices:
+            sparse_coalesce_indices[index] = []
+        sparse_coalesce_indices[index].append(tensor.get_storage_index(d))
+
+    # Perform diagonalization for all unique indices in the einsum equation
+    unique_indices = list(set(input_eqn))
+    keep_sparse_indices = []  # all indices kept in the output sparse indices tensor
+
+    new_indices = tensor.indices
+    new_dimensions = []
+    new_mapping = {}
+
+    for j, index in enumerate(unique_indices):
+        if index in sparse_coalesce_indices:
+            # Sparse index
+            coalesce = sparse_coalesce_indices[index]
+            indices_dim = coalesce[0]
+            # Diagonalize sparse dimensions by masking only coordinates with all positions equal.
+            if len(coalesce) > 1:
+                diagonal_mask = torch.all(new_indices[:, coalesce[1:]] == new_indices[:, indices_dim], dim=0)
+                new_indices = new_indices[diagonal_mask, :]
+                keep_sparse_indices.append(indices_dim)
+
+            # Diagonalize sparse with dense dimensions by gathering at the coordinate of the sparse dimension.
+            if index in dense_dims:
+                remove_at = dense_dims.index(index)
+                dense_index = new_indices[:, indices_dim]
+
+                new_values = _select_along_dim(new_values, remove_at, dense_index)
+                del dense_dims[remove_at]
+
+            new_dimensions.append(Dimension(size=tensor.dimensions[indices_dim].size, format=DimensionFormat.SPARSE))
+            new_mapping[j] = len(keep_sparse_indices) - 1
+
+        else:
+            # Dense index
+            values_dim = dense_dims.index(index)
+            new_dimensions.append(Dimension(size=new_values.shape[values_dim], format=DimensionFormat.DENSE))
+            new_mapping[j] = values_dim
+
+    new_indices = new_indices[:, keep_sparse_indices]  # Remove redundant sparse dimensions
+    new_eqn = "".join(unique_indices)  # Simplified einsum equation with no repeated indices
+
+    return new_eqn, SparseTensor(
+        indices=new_indices, values=new_values, dimensions=new_dimensions, dimension_mapping=new_mapping
+    )
 
 
 def _two_operand_einsum(
@@ -83,9 +162,7 @@ def _two_operand_einsum(
     """
 
 
-def sparse_einsum(
-    equation: str, out_format: str, *tensors: SparseTensor
-) -> SparseTensor:
+def sparse_einsum(equation: str, out_format: str, *tensors: SparseTensor) -> SparseTensor:
     """Execute a sparse einsum operation.
 
     Args:
