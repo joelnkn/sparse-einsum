@@ -75,7 +75,7 @@ def _select_along_dim(tensor: torch.Tensor, dim: int, index: torch.Tensor) -> to
 
 def _coalesce_einsum_indices(input_eqn: str, tensor: SparseTensor) -> Tuple[str, SparseTensor]:
     """Coalesce repeated indices of a tensor input in some einsum equation
-    into an equivalent einsum equation and sparse tensor.
+    into an equivalent einsum equation and sparse tensor that has no repeated indices.
 
     Args:
         input_eqn: Einsum equation for the input tensor
@@ -84,20 +84,22 @@ def _coalesce_einsum_indices(input_eqn: str, tensor: SparseTensor) -> Tuple[str,
     Returns:
         Tuple of (einsum equation, coalesced tensor)
     """
-    dense_dims = [d for d in range(tensor.ndim) if tensor.dimension_format[d] == DimensionFormat.DENSE]
-    sparse_dims = [d for d in range(tensor.ndim) if tensor.dimension_format[d] == DimensionFormat.SPARSE]
+    dense_dims = [d for d in range(tensor.ndim) if tensor.dimensions[d].is_dense]
+    sparse_dims = [d for d in range(tensor.ndim) if tensor.dimensions[d].is_sparse]
 
     # Diagonalize repeated indices in dense dimensions using einsum to combine them
     # Map dense dimensions to their corresponding labels from input equation
-    value_labels = ["@"] * tensor.values.ndim  # @ for nnz axis. TODO: throw error if @ is in input_eqn
+    value_labels = ["A"] * tensor.values.ndim  # A for nnz axis. TODO: throw error if A is in input_eqn
     for d in dense_dims:
         value_labels[tensor.get_storage_index(d)] = input_eqn[d]
     # Get unique labels to remove duplicates
-    dense_indices = ["@"] + list(set(value_labels[1:]))  # Keep @ as first index
-    # Build einsum equation to diagonalize repeated indices
-    diagonalize_einsum = f"{''.join(value_labels)}->{''.join(dense_indices)}"
-    # Apply einsum to get values with diagonalized dimensions
-    new_values = torch.einsum(diagonalize_einsum, tensor.values)
+    dense_indices = ["A"] + list(set(value_labels[1:]))  # Keep A as first index
+    new_values = tensor.values
+    if len(dense_indices) < len(value_labels):
+        # Build einsum equation to diagonalize repeated indices
+        diagonalize_einsum = f"{''.join(value_labels)}->{''.join(dense_indices)}"
+        # Apply einsum to get values with diagonalized dimensions
+        new_values = torch.einsum(diagonalize_einsum, new_values)
 
     # Mark repeated sparse dimensions to coalesce them
     sparse_coalesce_indices = {}
@@ -122,24 +124,25 @@ def _coalesce_einsum_indices(input_eqn: str, tensor: SparseTensor) -> Tuple[str,
             indices_dim = coalesce[0]
             # Diagonalize sparse dimensions by masking only coordinates with all positions equal.
             if len(coalesce) > 1:
-                diagonal_mask = torch.all(new_indices[:, coalesce[1:]] == new_indices[:, indices_dim], dim=0)
+                diagonal_mask = torch.all(new_indices[:, coalesce[1:]] == new_indices[:, [indices_dim]], dim=1)
                 new_indices = new_indices[diagonal_mask, :]
-                keep_sparse_indices.append(indices_dim)
+                new_values = new_values[diagonal_mask]
 
             # Diagonalize sparse with dense dimensions by gathering at the coordinate of the sparse dimension.
-            if index in dense_dims:
-                remove_at = dense_dims.index(index)
+            if index in dense_indices:
+                remove_at = dense_indices.index(index)
                 dense_index = new_indices[:, indices_dim]
 
                 new_values = _select_along_dim(new_values, remove_at, dense_index)
-                del dense_dims[remove_at]
+                del dense_indices[remove_at]
 
             new_dimensions.append(Dimension(size=tensor.dimensions[indices_dim].size, format=DimensionFormat.SPARSE))
-            new_mapping[j] = len(keep_sparse_indices) - 1
+            new_mapping[j] = len(keep_sparse_indices)
+            keep_sparse_indices.append(indices_dim)
 
         else:
             # Dense index
-            values_dim = dense_dims.index(index)
+            values_dim = dense_indices.index(index)
             new_dimensions.append(Dimension(size=new_values.shape[values_dim], format=DimensionFormat.DENSE))
             new_mapping[j] = values_dim
 
@@ -167,8 +170,8 @@ def sparse_einsum(equation: str, out_format: str, *tensors: SparseTensor) -> Spa
 
     Args:
         equation: Einsum equation in the form "ij,jk->ik"
+        out_format: Format of each dimension of the output tensor
         *tensors: Input tensors (mix of sparse and dense)
-        optimize: Whether to apply optimizations
 
     Returns:
         Output tensor

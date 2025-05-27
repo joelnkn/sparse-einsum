@@ -3,7 +3,7 @@ Sparse tensors and operations.
 """
 
 from __future__ import annotations
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Dict, Tuple
 from torch import Tensor
 from speinsum.typing import Dimension
@@ -20,7 +20,7 @@ class SparseTensor:
     def default_dimension_mapping(self) -> Dict[int, int]:
         """Default dimension mapping."""
         sparse_dims = 0
-        dense_dims = 0
+        dense_dims = 1  # 0 is reserved for nnz axis
         mapping = {}
         for i, dim in enumerate(self.dimensions):
             if dim.is_sparse:
@@ -34,7 +34,7 @@ class SparseTensor:
     # mapping from tensor dimension to sparse/dense dimension
     # by default, corresponding dimensions are assumed to appear in order. ie, the second dense
     # dimension is the second dimension in the values tensor.
-    dimension_mapping: Dict[int, int] = field(default_factory=default_dimension_mapping)
+    dimension_mapping: Dict[int, int] = None
 
     def __post_init__(self):
         """Post-initialization checks."""
@@ -51,14 +51,27 @@ class SparseTensor:
                 "Values must have the same number of dimensions as the number of dense dimensions in the shape."
             )
 
+        if self.dimension_mapping is None:
+            self.dimension_mapping = self.default_dimension_mapping()
+
     @property
     def shape(self) -> Tuple[int, ...]:
         """Get the shape of the tensor."""
         return tuple(dim.size for dim in self.dimensions)
 
+    @property
+    def ndim(self) -> int:
+        """Get the number of dimensions of the tensor."""
+        return len(self.dimensions)
+
+    @property
+    def nnz(self) -> int:
+        """Get the number of non-zero elements in the tensor."""
+        return self.values.shape[0]
+
     def __str__(self):
         """String representation."""
-        return f"SparseTensor(indices={self.indices}, values={self.values}, dimensions={self.dimensions})"
+        return f"SparseTensor(\n  indices={self.indices}, \n  values={self.values}, \n  dimensions={self.dimensions}\n)"
 
     def get_storage_index(self, dim: int) -> int:
         """Get the index of a dimension in the tensor.
