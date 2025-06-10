@@ -1,6 +1,6 @@
 import pytest
 import torch
-from speinsum.compiler import _coalesce_einsum_indices, sparse_einsum
+from speinsum.compiler import _coalesce_einsum_indices, _two_operand_einsum, sparse_einsum
 from speinsum.sparse_tensor import SparseTensor
 from speinsum.typing import Dimension, DimensionFormat
 
@@ -106,29 +106,202 @@ def test_coalesce_einsum_indices(test_case):
     print(new_tensor)
 
 
-def test_basic_dense_einsum():
-    # Test with dense tensors first
-    a = torch.randn(3, 4)
-    b = torch.randn(4, 5)
+@pytest.mark.parametrize(
+    "test_case",
+    [
+        {
+            "name": "sparse_elementwise_mul",
+            "a_eqn": "i",
+            "b_eqn": "i",
+            "out_eqn": "i",
+            "a_dims": [Dimension(8, DimensionFormat.SPARSE)],
+            "b_dims": [Dimension(8, DimensionFormat.SPARSE)],
+            "out_format": "s",
+        },
+        {
+            "name": "sparse_dot_product",
+            "a_eqn": "i",
+            "b_eqn": "i",
+            "out_eqn": "",
+            "a_dims": [
+                Dimension(8, DimensionFormat.SPARSE),
+            ],
+            "b_dims": [
+                Dimension(8, DimensionFormat.SPARSE),
+            ],
+            "out_format": "s",
+        },
+        # Matrix-vector multiplication
+        {
+            "name": "sparse_matvec_mul",
+            "a_eqn": "ij",
+            "b_eqn": "j",
+            "out_eqn": "i",
+            "a_dims": [Dimension(4, DimensionFormat.SPARSE), Dimension(6, DimensionFormat.SPARSE)],
+            "b_dims": [Dimension(6, DimensionFormat.SPARSE)],
+            "out_format": "s",
+        },
+        # Matrix-matrix multiplication
+        {
+            "name": "sparse_matmat_mul",
+            "a_eqn": "ik",
+            "b_eqn": "kj",
+            "out_eqn": "ij",
+            "a_dims": [Dimension(4, DimensionFormat.SPARSE), Dimension(6, DimensionFormat.SPARSE)],
+            "b_dims": [Dimension(6, DimensionFormat.SPARSE), Dimension(5, DimensionFormat.SPARSE)],
+            "out_format": "ss",
+        },
+        # Dense result from sparse matmul
+        {
+            "name": "sparse_matmat_dense_output",
+            "a_eqn": "ik",
+            "b_eqn": "kj",
+            "out_eqn": "ij",
+            "a_dims": [Dimension(4, DimensionFormat.SPARSE), Dimension(6, DimensionFormat.SPARSE)],
+            "b_dims": [Dimension(6, DimensionFormat.SPARSE), Dimension(5, DimensionFormat.SPARSE)],
+            "out_format": "dd",
+        },
+        # Broadcasting over dense axis
+        {
+            "name": "sparse_broadcast_dense_mul",
+            "a_eqn": "ij",
+            "b_eqn": "j",
+            "out_eqn": "ij",
+            "a_dims": [Dimension(4, DimensionFormat.SPARSE), Dimension(5, DimensionFormat.DENSE)],
+            "b_dims": [Dimension(5, DimensionFormat.DENSE)],
+            "out_format": "sd",
+        },
+        # Mixed dense and sparse outer product
+        {
+            "name": "sparse_outer_product",
+            "a_eqn": "i",
+            "b_eqn": "j",
+            "out_eqn": "ij",
+            "a_dims": [Dimension(4, DimensionFormat.SPARSE)],
+            "b_dims": [Dimension(6, DimensionFormat.SPARSE)],
+            "out_format": "ss",
+        },
+        # One input dense, one input sparse
+        {
+            "name": "dense_sparse_mix",
+            "a_eqn": "ij",
+            "b_eqn": "ij",
+            "out_eqn": "ij",
+            "a_dims": [Dimension(3, DimensionFormat.DENSE), Dimension(3, DimensionFormat.SPARSE)],
+            "b_dims": [Dimension(3, DimensionFormat.DENSE), Dimension(3, DimensionFormat.SPARSE)],
+            "out_format": "ds",
+        },
+        # No output indices (full reduction)
+        {
+            "name": "sparse_full_reduction",
+            "a_eqn": "ij",
+            "b_eqn": "ij",
+            "out_eqn": "",
+            "a_dims": [Dimension(3, DimensionFormat.SPARSE), Dimension(3, DimensionFormat.SPARSE)],
+            "b_dims": [Dimension(3, DimensionFormat.SPARSE), Dimension(3, DimensionFormat.SPARSE)],
+            "out_format": "",
+        },
+        # 3D contraction over middle dimension (sparse-sparse-sparse)
+        {
+            "name": "sparse_3d_contraction_all_sparse",
+            "a_eqn": "ijk",
+            "b_eqn": "jkl",
+            "out_eqn": "il",
+            "a_dims": [
+                Dimension(4, DimensionFormat.SPARSE),
+                Dimension(5, DimensionFormat.SPARSE),
+                Dimension(6, DimensionFormat.SPARSE),
+            ],
+            "b_dims": [
+                Dimension(5, DimensionFormat.SPARSE),
+                Dimension(6, DimensionFormat.SPARSE),
+                Dimension(7, DimensionFormat.SPARSE),
+            ],
+            "out_format": "ss",
+        },
+        # Mixed contraction with dense inner dimension (sparse-dense-sparse)
+        {
+            "name": "sparse_3d_contraction_inner_dense",
+            "a_eqn": "ijk",
+            "b_eqn": "jkl",
+            "out_eqn": "il",
+            "a_dims": [
+                Dimension(4, DimensionFormat.SPARSE),
+                Dimension(5, DimensionFormat.DENSE),
+                Dimension(6, DimensionFormat.SPARSE),
+            ],
+            "b_dims": [
+                Dimension(5, DimensionFormat.DENSE),
+                Dimension(6, DimensionFormat.SPARSE),
+                Dimension(7, DimensionFormat.SPARSE),
+            ],
+            "out_format": "ss",
+        },
+        # Broadcast with one dense axis (outer product style)
+        {
+            "name": "sparse_dense_broadcast_outer",
+            "a_eqn": "ijk",
+            "b_eqn": "l",
+            "out_eqn": "ijkl",
+            "a_dims": [
+                Dimension(3, DimensionFormat.SPARSE),
+                Dimension(4, DimensionFormat.DENSE),
+                Dimension(5, DimensionFormat.SPARSE),
+            ],
+            "b_dims": [
+                Dimension(6, DimensionFormat.SPARSE),
+            ],
+            "out_format": "sdsd",
+        },
+        # Diagonal across two sparse dimensions in one input
+        {
+            "name": "sparse_3d_diagonal_reduce",
+            "a_eqn": "iji",
+            "b_eqn": "",
+            "out_eqn": "j",
+            "a_dims": [
+                Dimension(4, DimensionFormat.SPARSE),
+                Dimension(5, DimensionFormat.DENSE),
+                Dimension(4, DimensionFormat.SPARSE),
+            ],
+            "b_dims": [],
+            "out_format": "d",
+        },
+        # Reduction to scalar (mix of dense and sparse)
+        {
+            "name": "sparse_highdim_scalar_output",
+            "a_eqn": "ijkl",
+            "b_eqn": "ijkl",
+            "out_eqn": "",
+            "a_dims": [
+                Dimension(2, DimensionFormat.SPARSE),
+                Dimension(3, DimensionFormat.SPARSE),
+                Dimension(4, DimensionFormat.DENSE),
+                Dimension(5, DimensionFormat.DENSE),
+            ],
+            "b_dims": [
+                Dimension(2, DimensionFormat.SPARSE),
+                Dimension(3, DimensionFormat.SPARSE),
+                Dimension(4, DimensionFormat.DENSE),
+                Dimension(5, DimensionFormat.DENSE),
+            ],
+            "out_format": "",
+        },
+    ],
+)
+def test_two_operand_einsum(test_case):
+    print("Performing ", test_case["name"])
+    a_tensor = SparseTensor.random_sparse_tensor(test_case["a_dims"], 50)
+    b_tensor = SparseTensor.random_sparse_tensor(test_case["b_dims"], 50)
 
-    # Compare with PyTorch's einsum
-    expected = torch.einsum("ij,jk->ik", a, b)
-    result = sparse_einsum("ij,jk->ik", "ik", a, b)
+    einsum_eqn = f"{test_case["a_eqn"]}, {test_case["b_eqn"]} -> {test_case["out_eqn"]}"
+    expected = torch.einsum(einsum_eqn, a_tensor.to_dense(), b_tensor.to_dense())
 
-    assert torch.allclose(result, expected)
+    print(a_tensor, b_tensor)
+    print(expected)
+    out_tensor = _two_operand_einsum(
+        test_case["a_eqn"], test_case["b_eqn"], test_case["out_eqn"], a_tensor, b_tensor, test_case["out_format"]
+    )
 
-
-def test_sparse_dense_einsum():
-    # Create a sparse matrix
-    indices = torch.tensor([[0, 1, 2], [1, 2, 0]])  # 2D indices
-    values = torch.tensor([1.0, 2.0, 3.0])
-    sparse = torch.sparse_coo_tensor(indices, values, (3, 3))
-
-    # Dense matrix
-    dense = torch.randn(3, 4)
-
-    # Compare with PyTorch's einsum (after converting sparse to dense)
-    expected = torch.einsum("ij,jk->ik", sparse.to_dense(), dense)
-    result = sparse_einsum("ij,jk->ik", "ik", sparse, dense)
-
-    assert torch.allclose(result, expected)
+    print(out_tensor)
+    assert torch.allclose(out_tensor.to_dense(), expected), "The computed einsum is not as expected"

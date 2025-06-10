@@ -4,9 +4,11 @@ Sparse tensors and operations.
 
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Dict, Tuple
+import math
+from typing import Dict, Tuple, Sequence
+import torch
 from torch import Tensor
-from speinsum.typing import Dimension
+from speinsum.typing import Dimension, DimensionFormat
 
 
 @dataclass
@@ -93,6 +95,104 @@ class SparseTensor:
     def dense_dimensions(self) -> Tuple[int, ...]:
         """Get the indices of all dense dimensions in this tensor."""
         return tuple(i for i, dim in enumerate(self.dimensions) if dim.is_dense)
+
+    @staticmethod
+    def random_sparse_tensor(dims: Sequence[Dimension], approx_nonzeros: int):
+        """
+        Generates a random sparse tensor given a list of Dimension objects.
+
+        Sparse dimensions contribute to the index set.
+        Dense dimensions contribute to the shape of each stored value.
+
+        Args:
+            dims (List[Dimension]): List of dimensions, each with size and format (Sparse or Dense).
+            approx_nonzeros (int): Approximate number of non-zero entries to generate.
+
+        Returns:
+            SparseTensor: A sparse tensor with generated indices and random dense values.
+        """
+        sparse_dims = [d for d in dims if d.format == DimensionFormat.SPARSE]
+        dense_dims = [d for d in dims if d.format == DimensionFormat.DENSE]
+
+        sparse_sizes = [d.size for d in sparse_dims]
+        dense_sizes = [d.size for d in dense_dims]
+
+        total_sparse_space = math.prod(sparse_sizes)
+
+        # Estimate number of samples needed to reduce collision
+        if total_sparse_space - approx_nonzeros > 0.1 * total_sparse_space:
+            sample_count = max(
+                int(total_sparse_space * math.log(total_sparse_space / (total_sparse_space - approx_nonzeros))),
+                approx_nonzeros,
+            )
+        else:
+            sample_count = int(total_sparse_space * math.log(total_sparse_space))
+
+        # Generate sparse indices with shape (num_sparse_dims, actual_nnz)
+        index_tensors = [torch.randint(0, size, (sample_count,)) for size in sparse_sizes]
+        raw_indices = torch.stack(index_tensors, dim=1)
+        indices = torch.unique(raw_indices, dim=0)
+
+        nnz = indices.size(0)
+
+        # Generate values with shape (nnz, *dense_sizes)
+        values_shape = (nnz, *dense_sizes)
+        values = torch.randn(values_shape)
+
+        # Build mapping: maps from original dim index → storage index
+        mapping: Dict[int, int] = {}
+        sparse_counter = 0
+        dense_counter = 1  # because dim 0 in values is for nnz
+
+        for i, d in enumerate(dims):
+            if d.format == DimensionFormat.SPARSE:
+                mapping[i] = sparse_counter
+                sparse_counter += 1
+            else:
+                mapping[i] = dense_counter
+                dense_counter += 1
+
+        return SparseTensor(indices=indices, values=values, dimensions=dims, dimension_mapping=mapping)
+
+    @staticmethod
+    def from_dense(self, tensor: Tensor, formats: Sequence[DimensionFormat], sparse_rate: float = 0.8) -> SparseTensor:
+        """Generate a new sparse tensor given a dense tensor and the format of each dimension.
+
+        Args:
+            tensor (Tensor): the tensor from which data is derived.
+            formats (Sequence[DimensionFormat]): the desired format of each dimension in the dense tensor.
+            Must have the same length as tensor.shape
+            sparse_rate(float): a value in the range [0,1] that determines how much sparsity to add to each sparse
+            dimension. Eg. if 0.5 is given, half of the indices from the original tensor will be keep in that sparse
+            dimension.
+
+        Returns:
+            SparseTensor: a new sparse tensor derived from the given dense tensor
+        """
+        ...
+
+    def to_dense(self) -> Tensor:
+        """
+        Converts the sparse tensor to its dense representation.
+
+        Returns:
+            Tensor: A dense tensor of shape `self.shape` where the sparse indices
+            are populated with corresponding values, and all other entries are zero.
+        """
+        dense = torch.zeros(self.shape)
+
+        for i in range(self.indices.shape[0]):
+            index = tuple(
+                (
+                    slice(None)
+                    if self.dimensions[j].format == DimensionFormat.DENSE
+                    else self.indices[i, self.get_storage_index(j)]
+                )
+                for j in range(len(self.dimensions))
+            )
+            dense[index] = self.values[i]
+
+        return dense
 
     def tensordot(self, other: SparseTensor, dims: Tuple[int, ...]) -> SparseTensor:
         """Compute a tensor dot product with another tensor.

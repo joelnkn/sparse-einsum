@@ -10,6 +10,15 @@ from .sparse_tensor import SparseTensor
 from .typing import DimensionFormat, Dimension
 
 
+# def einsum_gs(expression, **tensors):
+#     print(f"Issued: {expression}")
+#     print("Supplied tensors:")
+#     for name, tensor in tensors.items():
+#         print(f"  {name}: shape={tuple(tensor.shape)}, dtype={tensor.dtype}, device={tensor.device}")
+#         print(f"    {tensor}")
+#     return torch.zeros((1,))
+
+
 def parse_einsum_equation(equation: str) -> Tuple[List[str], str]:
     """Parse an einsum equation into input subscripts and output subscript.
 
@@ -157,7 +166,7 @@ def _coalesce_einsum_indices(input_eqn: str, tensor: SparseTensor) -> Tuple[str,
 
 
 def _two_operand_einsum(
-    a_eqn: str, b_eqn: str, out_eqn: str, a_tensor: SparseTensor, b_tensor: SparseTensor
+    a_eqn: str, b_eqn: str, out_eqn: str, a_tensor: SparseTensor, b_tensor: SparseTensor, out_format: str
 ) -> SparseTensor:
     """Execute a two-operand einsum operation.
 
@@ -165,6 +174,9 @@ def _two_operand_einsum(
         a_eqn: Einsum equation for the first tensor
         b_eqn: Einsum equation for the second tensor
     """
+    a_eqn, a_tensor = _coalesce_einsum_indices(a_eqn, a_tensor)
+    b_eqn, b_tensor = _coalesce_einsum_indices(b_eqn, b_tensor)
+
     a_dense_dims = {
         a_eqn[d]: a_tensor.get_storage_index(d) for d in range(a_tensor.ndim) if a_tensor.dimensions[d].is_dense
     }
@@ -183,6 +195,9 @@ def _two_operand_einsum(
     a_mixed_dims = a_sparse_dims.keys() & b_dense_dims.keys()  # dimensions that are sparse in a and dense in b
     b_mixed_dims = b_sparse_dims.keys() & a_dense_dims.keys()  # dimensions that are sparse in b and dense in a
 
+    out_sparse = set(out_eqn[i] for i in range(len(out_eqn)) if out_format[i] == "s")
+    out_dense = set(out_eqn[i] for i in range(len(out_eqn)) if out_format[i] == "d")
+
     tensors = {}
     nnz_index = "p"  # TODO: make sure nnz_index does not appear in einsum
 
@@ -192,34 +207,41 @@ def _two_operand_einsum(
             A_shared_sp=a_tensor.indices[:, [a_sparse_dims[d] for d in shared_sparse]],
             B_shared_sp=b_tensor.indices[:, [b_sparse_dims[d] for d in shared_sparse]],
         ).T
-        print("sparse intersection", int_idx)
+        # print("sparse intersection", int_idx)
 
         tensors["A_nnz"] = int_idx[:, 0]
         tensors["B_nnz"] = int_idx[:, 1]
         a_nnz = f"A_nnz[{nnz_index}]"
         b_nnz = f"B_nnz[{nnz_index}]"
 
-        out_indices = torch.stack(
+        a_sparse_order = list(a_sparse_dims.keys())
+        b_sparse_order = list(b_sparse_dims.keys() - a_sparse_dims.keys())
+        out_sparse_order = a_sparse_order + b_sparse_order
+        out_indices = torch.cat(
             [
-                a_tensor.indices[int_idx[:, 0], [a_sparse_dims[d] for d in a_sparse_dims]],
-                b_tensor.indices[int_idx[:, 1], [b_sparse_dims[d] for d in (b_sparse_dims - a_sparse_dims)]],
+                a_tensor.indices[int_idx[:, 0]][:, [a_sparse_dims[d] for d in a_sparse_order]],
+                b_tensor.indices[int_idx[:, 1]][:, [b_sparse_dims[d] for d in b_sparse_order]],
             ],
             dim=1,
         )
 
     elif a_mixed_dims and not b_mixed_dims:
+        # All sparse dimensions in a_tensor
         tensors["B_nnz"] = torch.zeros((a_tensor.nnz))
         a_nnz = nnz_index
         b_nnz = f"B_nnz[{nnz_index}]"
 
-        out_indices = a_tensor.indices
+        out_sparse_order = list(a_sparse_dims)
+        out_indices = a_tensor.indices[:, [a_sparse_dims[d] for d in out_sparse_order]]
 
     elif b_mixed_dims and not a_mixed_dims:
+        # All sparse dimensions in b_tensor
         tensors["A_nnz"] = torch.zeros((b_tensor.nnz,))
         a_nnz = f"A_nnz[{nnz_index}]"
         b_nnz = nnz_index
 
-        out_indices = b_tensor.indices
+        out_sparse_order = list(b_sparse_dims)
+        out_indices = b_tensor.indices[:, [b_sparse_dims[d] for d in out_sparse_order]]
 
     else:
         int_idx = torch.stack(
@@ -228,17 +250,20 @@ def _two_operand_einsum(
                 torch.arange(b_tensor.nnz).expand(a_tensor.nnz),
             ]
         )
-        print("cross product", int_idx)
+        # print("cross product", int_idx)
 
         tensors["A_nnz"] = int_idx[:, 0]
         tensors["B_nnz"] = int_idx[:, 1]
         a_nnz = f"A_nnz[{nnz_index}]"
         b_nnz = f"B_nnz[{nnz_index}]"
 
-        out_indices = torch.stack(
+        a_sparse_order = list(a_sparse_dims.keys())
+        b_sparse_order = list(b_sparse_dims.keys() - a_sparse_dims.keys())
+        out_sparse_order = a_sparse_order + b_sparse_order
+        out_indices = torch.cat(
             [
-                a_tensor.indices[int_idx[:, 0], [a_sparse_dims[d] for d in a_sparse_dims]],
-                b_tensor.indices[int_idx[:, 1], [b_sparse_dims[d] for d in (b_sparse_dims - a_sparse_dims)]],
+                a_tensor.indices[int_idx[:, 0]][:, [a_sparse_dims[d] for d in a_sparse_order]],
+                b_tensor.indices[int_idx[:, 1]][:, [b_sparse_dims[d] for d in b_sparse_order]],
             ],
             dim=1,
         )
@@ -250,12 +275,38 @@ def _two_operand_einsum(
     tensors["A_val"] = a_tensor.values
     tensors["B_val"] = b_tensor.values
 
+    out_dims = set(out_eqn)
     sparse_dims = a_sparse_dims.keys() | b_sparse_dims.keys()
     dense_dims = list(a_dense_dims.keys() & b_dense_dims.keys())
-    dense_sizes = [out_indices.shape[0]] + [a_tensor.values.shape[a_dense_dims[idx]] for idx in dense_dims]
+    dense_sizes = [out_indices.shape[0]]
+    for idx in dense_dims:
+        if idx in a_dense_dims:
+            dense_sizes.append(a_tensor.values.shape[a_dense_dims[idx]])
+        else:
+            dense_sizes.append(b_tensor.values.shape[b_dense_dims[idx]])
 
-    # tensors["Out_val"] = torch.zeros(dense_sizes)
-    eqn = f"Out_val[{",".join([nnz_index] + dense_dims)}] += "
+    # sparse -> dense conversion
+    exclude = set()
+    for dim in sparse_dims - out_sparse:
+        i = out_sparse_order.index(dim)
+        if dim in out_dense:
+            gather_tensor_name = f"{dim}_G"
+            tensors[gather_tensor_name] = out_indices[:, i]
+            dense_dims.append(f"{gather_tensor_name}[{nnz_index}]")
+            if dim in a_sparse_dims:
+                dense_sizes.append(a_tensor.shape[a_eqn.index(dim)])
+            else:
+                dense_sizes.append(b_tensor.shape[b_eqn.index(dim)])
+
+        exclude.add(i)
+
+    out_sparse_order = [out_sparse_order[i] for i in range(len(out_sparse_order)) if i not in exclude]
+    out_indices = out_indices[:, [i for i in range(out_indices.shape[1]) if i not in exclude]]
+
+    # einsum_gs construction
+    tensors["Out_val"] = torch.zeros(dense_sizes)
+    eqn_lhs = f"Out_val[{", ".join([nnz_index] + dense_dims)}]"
+    eqn = eqn_lhs + " += "
 
     a_dense_index = [None] * len(a_tensor.values.shape)
     a_dense_index[0] = a_nnz
@@ -265,6 +316,7 @@ def _two_operand_einsum(
         else:
             a_dense_index[i] = dim
     eqn += f"A_val[{",".join(a_dense_index)}]"
+    eqn += " * "
 
     b_dense_index = [None] * len(b_tensor.values.shape)
     b_dense_index[0] = b_nnz
@@ -276,18 +328,44 @@ def _two_operand_einsum(
     eqn += f"B_val[{",".join(b_dense_index)}]"
 
     print(eqn)
-    out_val = einsum_gs(eqn, tensors=tensors)
+    out_val = einsum_gs(eqn, **tensors)
+    print("intermediate val:")
     print(out_val)
-    #
+    print("intermediate indices:")
+    print(out_indices)
+
     # Sparse Coalescing
+    if len(sparse_dims - out_dims) > 0:
+        # perform sparse coalescing if there is a reduction over some sparse dimension.
+        if out_indices.shape[1] > 0:
+            unique_indices, gather_idx = torch.unique(out_indices, dim=0, return_inverse=True)
+        else:
+            unique_indices, gather_idx = torch.zeros((1, 0)), torch.zeros((out_indices.shape[0],), dtype=torch.long)
+        coalesce_eqn = f"Out[{",".join([f"G[{nnz_index}]"] + dense_dims)}] += {eqn_lhs}"
+        dense_sizes[0] = unique_indices.shape[0]
+        out_val = einsum_gs(coalesce_eqn, Out_val=out_val, G=gather_idx, Out=torch.zeros(dense_sizes))
+        out_indices = unique_indices
 
     dimension_format = []
-    for idx in out_eqn:
-        dimension_format.append(
-            Dimension(size=300, format=DimensionFormat.DENSE if idx in dense_dims else DimensionFormat.SPARSE)
-        )
+    dimension_mapping = {}
+    for i, idx in enumerate(out_eqn):
+        if idx in dense_dims:
+            dimension_mapping[i] = dense_dims.index(idx) + 1
+            dimension_format.append(
+                Dimension(
+                    size=dense_sizes[dense_dims.index(idx) + 1],
+                    format=DimensionFormat.DENSE,
+                )
+            )
+        else:
+            dimension_mapping[i] = out_sparse_order.index(idx)
+            if idx in a_sparse_dims:
+                size = a_tensor.shape[a_eqn.index(idx)]
+            else:
+                size = b_tensor.shape[b_eqn.index(dim)]
+            dimension_format.append(Dimension(size=size, format=DimensionFormat.SPARSE))
 
-    return SparseTensor(out_indices, out_val, dimension_format)
+    return SparseTensor(out_indices, out_val, dimension_format, dimension_mapping)
 
 
 def sparse_einsum(equation: str, out_format: str, *tensors: SparseTensor) -> SparseTensor:
