@@ -71,6 +71,11 @@ class SparseTensor:
         """Get the number of non-zero elements in the tensor."""
         return self.values.shape[0]
 
+    @property
+    def is_dense(self) -> bool:
+        """Returns true iff all dimensions of this tensor are dense"""
+        return all(dim.is_dense for dim in self.dimensions)
+
     def __str__(self):
         """String representation."""
         return f"SparseTensor(\n  indices={self.indices}, \n  values={self.values}, \n  dimensions={self.dimensions}\n)"
@@ -129,9 +134,12 @@ class SparseTensor:
             sample_count = int(total_sparse_space * math.log(total_sparse_space))
 
         # Generate sparse indices with shape (num_sparse_dims, actual_nnz)
-        index_tensors = [torch.randint(0, size, (sample_count,)) for size in sparse_sizes]
-        raw_indices = torch.stack(index_tensors, dim=1)
-        indices = torch.unique(raw_indices, dim=0)
+        if sparse_sizes:
+            index_tensors = [torch.randint(0, size, (sample_count,)) for size in sparse_sizes]
+            raw_indices = torch.stack(index_tensors, dim=1)
+            indices = torch.unique(raw_indices, dim=0)
+        else:
+            indices = torch.zeros((1, 0))
 
         nnz = indices.size(0)
 
@@ -155,7 +163,7 @@ class SparseTensor:
         return SparseTensor(indices=indices, values=values, dimensions=dims, dimension_mapping=mapping)
 
     @staticmethod
-    def from_dense(self, tensor: Tensor, formats: Sequence[DimensionFormat], sparse_rate: float = 0.8) -> SparseTensor:
+    def from_dense(tensor: Tensor, formats: Sequence[DimensionFormat], sparse_rate: float = 0.8) -> SparseTensor:
         """Generate a new sparse tensor given a dense tensor and the format of each dimension.
 
         Args:
@@ -169,7 +177,42 @@ class SparseTensor:
         Returns:
             SparseTensor: a new sparse tensor derived from the given dense tensor
         """
-        ...
+        from itertools import product
+
+        print(tensor.shape, formats)
+        assert len(formats) == tensor.ndim, "Format string must match tensor rank"
+
+        dims = tensor.shape
+        dense_dims = [i for i, f in enumerate(formats) if f == DimensionFormat.DENSE]
+
+        dimensions = tuple(Dimension(size, fmt) for size, fmt in zip(dims, formats))
+
+        sparse_indices_dims = [i for i, f in enumerate(formats) if f == DimensionFormat.SPARSE]
+        dense_dims = [i for i, f in enumerate(formats) if f == DimensionFormat.DENSE]
+
+        # Get all combinations of sparse indices
+        sparse_sizes = [dims[i] for i in sparse_indices_dims]
+        sparse_coords = list(product(*[range(s) for s in sparse_sizes]))
+        sparse_coords_tensor = torch.tensor(sparse_coords, dtype=torch.long)
+
+        # For each sparse index, extract the dense subblock
+        dense_subshape = [dims[i] for i in dense_dims]
+        dense_slices = []
+        for idx in sparse_coords:
+            index = [slice(None)] * tensor.ndim
+            for dim, val in zip(sparse_indices_dims, idx):
+                index[dim] = val
+            dense_block = tensor[tuple(index)]
+            dense_slices.append(dense_block)
+
+        # Stack into values tensor of shape (num_blocks, *dense_subshape)
+        values = torch.stack(dense_slices, dim=0) if dense_slices else torch.empty((0, *dense_subshape), device=device)
+
+        return SparseTensor(
+            indices=sparse_coords_tensor,  # (nnz, num_sparse_dims)
+            values=values,  # (nnz, *dense_shape)
+            dimensions=dimensions,
+        )
 
     def to_dense(self) -> Tensor:
         """

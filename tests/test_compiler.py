@@ -1,6 +1,6 @@
 import pytest
 import torch
-from speinsum.compiler import _coalesce_einsum_indices, _two_operand_einsum, sparse_einsum
+from speinsum.compiler import _coalesce_einsum_indices, _two_operand_einsum, sparse_einsum, parse_einsum_equation
 from speinsum.sparse_tensor import SparseTensor
 from speinsum.typing import Dimension, DimensionFormat
 
@@ -305,3 +305,317 @@ def test_two_operand_einsum(test_case):
 
     print(out_tensor)
     assert torch.allclose(out_tensor.to_dense(), expected), "The computed einsum is not as expected"
+
+
+@pytest.mark.parametrize(
+    "test_case",
+    [
+        {
+            "name": "sparse_elementwise_mul",
+            "equation": "i,i->i",
+            "out_format": "s",
+            "tensor_dims": [[Dimension(10, DimensionFormat.SPARSE)], [Dimension(10, DimensionFormat.SPARSE)]],
+        },
+        {
+            "name": "dense_elementwise_mul",
+            "equation": "i,i->i",
+            "out_format": "d",
+            "tensor_dims": [[Dimension(10, DimensionFormat.DENSE)], [Dimension(10, DimensionFormat.DENSE)]],
+        },
+        {
+            "name": "sparse_dense_elementwise_mul",
+            "equation": "i,i->i",
+            "out_format": "s",
+            "tensor_dims": [[Dimension(10, DimensionFormat.SPARSE)], [Dimension(10, DimensionFormat.DENSE)]],
+        },
+        {
+            "name": "sparse_dense_broadcast_mul",
+            "equation": "ij,j->ij",
+            "out_format": "sd",
+            "tensor_dims": [
+                [Dimension(8, DimensionFormat.SPARSE), Dimension(4, DimensionFormat.DENSE)],
+                [Dimension(4, DimensionFormat.DENSE)],
+            ],
+        },
+        {
+            "name": "sparse_sparse_reduce_sum",
+            "equation": "ij->i",
+            "out_format": "s",
+            "tensor_dims": [[Dimension(5, DimensionFormat.SPARSE), Dimension(6, DimensionFormat.SPARSE)]],
+        },
+        {
+            "name": "sparse_dense_matvec",
+            "equation": "ij,j->i",
+            "out_format": "s",
+            "tensor_dims": [
+                [Dimension(7, DimensionFormat.SPARSE), Dimension(3, DimensionFormat.DENSE)],
+                [Dimension(3, DimensionFormat.DENSE)],
+            ],
+        },
+        {
+            "name": "sparse_dense_matmul",
+            "equation": "ik,kj->ij",
+            "out_format": "sd",
+            "tensor_dims": [
+                [Dimension(6, DimensionFormat.SPARSE), Dimension(4, DimensionFormat.DENSE)],
+                [Dimension(4, DimensionFormat.DENSE), Dimension(5, DimensionFormat.DENSE)],
+            ],
+        },
+        {
+            "name": "sparse_sparse_contract",
+            "equation": "ik,kj->ij",
+            "out_format": "ss",
+            "tensor_dims": [
+                [Dimension(6, DimensionFormat.SPARSE), Dimension(4, DimensionFormat.SPARSE)],
+                [Dimension(4, DimensionFormat.SPARSE), Dimension(5, DimensionFormat.SPARSE)],
+            ],
+        },
+        {
+            "name": "sparse_batch_matmul",
+            "equation": "bij,bjk->bik",
+            "out_format": "ssd",
+            "tensor_dims": [
+                [
+                    Dimension(2, DimensionFormat.SPARSE),
+                    Dimension(3, DimensionFormat.SPARSE),
+                    Dimension(4, DimensionFormat.DENSE),
+                ],
+                [
+                    Dimension(2, DimensionFormat.SPARSE),
+                    Dimension(4, DimensionFormat.DENSE),
+                    Dimension(5, DimensionFormat.DENSE),
+                ],
+            ],
+        },
+        {
+            "name": "broadcast_dense_dense_outer",
+            "equation": "i,j->ij",
+            "out_format": "dd",
+            "tensor_dims": [
+                [Dimension(3, DimensionFormat.DENSE)],
+                [Dimension(4, DimensionFormat.DENSE)],
+            ],
+        },
+        {
+            "name": "sparse_outer_product",
+            "equation": "i,j->ij",
+            "out_format": "ss",
+            "tensor_dims": [
+                [Dimension(3, DimensionFormat.SPARSE)],
+                [Dimension(4, DimensionFormat.SPARSE)],
+            ],
+        },
+        {
+            "name": "sparse_dense_outer_product",
+            "equation": "i,j->ij",
+            "out_format": "sd",
+            "tensor_dims": [
+                [Dimension(3, DimensionFormat.SPARSE)],
+                [Dimension(4, DimensionFormat.DENSE)],
+            ],
+        },
+        {
+            "name": "triple_elementwise_ssd",
+            "equation": "i,i,i->i",
+            "out_format": "s",
+            "tensor_dims": [
+                [Dimension(10, DimensionFormat.SPARSE)],
+                [Dimension(10, DimensionFormat.SPARSE)],
+                [Dimension(10, DimensionFormat.DENSE)],
+            ],
+        },
+        {
+            "name": "triple_elementwise_sdd",
+            "equation": "i,i,i->i",
+            "out_format": "s",
+            "tensor_dims": [
+                [Dimension(10, DimensionFormat.SPARSE)],
+                [Dimension(10, DimensionFormat.DENSE)],
+                [Dimension(10, DimensionFormat.DENSE)],
+            ],
+        },
+        {
+            "name": "triple_elementwise_ddd",
+            "equation": "i,i,i->i",
+            "out_format": "d",
+            "tensor_dims": [
+                [Dimension(10, DimensionFormat.DENSE)],
+                [Dimension(10, DimensionFormat.DENSE)],
+                [Dimension(10, DimensionFormat.DENSE)],
+            ],
+        },
+        {
+            "name": "reduction_mixed_sds_d",
+            "equation": "iij,j->i",
+            "out_format": "s",
+            "tensor_dims": [
+                [
+                    Dimension(4, DimensionFormat.SPARSE),
+                    Dimension(4, DimensionFormat.DENSE),
+                    Dimension(5, DimensionFormat.SPARSE),
+                ],
+                [Dimension(5, DimensionFormat.DENSE)],
+            ],
+        },
+        {
+            "name": "reduction_mixed_dsd_d",
+            "equation": "iij,j->i",
+            "out_format": "d",
+            "tensor_dims": [
+                [
+                    Dimension(4, DimensionFormat.DENSE),
+                    Dimension(4, DimensionFormat.SPARSE),
+                    Dimension(5, DimensionFormat.DENSE),
+                ],
+                [Dimension(5, DimensionFormat.DENSE)],
+            ],
+        },
+        {
+            "name": "triple_outer_product_ssd",
+            "equation": "i,j,k->ijk",
+            "out_format": "ssd",
+            "tensor_dims": [
+                [Dimension(3, DimensionFormat.SPARSE)],
+                [Dimension(4, DimensionFormat.SPARSE)],
+                [Dimension(2, DimensionFormat.DENSE)],
+            ],
+        },
+        {
+            "name": "triangular_contraction",
+            "equation": "ij,jk,ki->",
+            "out_format": "",
+            "tensor_dims": [
+                [Dimension(3, DimensionFormat.SPARSE), Dimension(3, DimensionFormat.DENSE)],
+                [Dimension(3, DimensionFormat.DENSE), Dimension(3, DimensionFormat.DENSE)],
+                [Dimension(3, DimensionFormat.DENSE), Dimension(3, DimensionFormat.DENSE)],
+            ],
+        },
+        {
+            "name": "broadcasted_batch_matmul",
+            "equation": "bij,bjk,bki->b",
+            "out_format": "s",
+            "tensor_dims": [
+                [
+                    Dimension(2, DimensionFormat.SPARSE),
+                    Dimension(3, DimensionFormat.DENSE),
+                    Dimension(4, DimensionFormat.DENSE),
+                ],
+                [
+                    Dimension(2, DimensionFormat.SPARSE),
+                    Dimension(4, DimensionFormat.DENSE),
+                    Dimension(5, DimensionFormat.DENSE),
+                ],
+                [
+                    Dimension(2, DimensionFormat.SPARSE),
+                    Dimension(5, DimensionFormat.DENSE),
+                    Dimension(3, DimensionFormat.DENSE),
+                ],
+            ],
+        },
+    ],
+)
+def test_sparse_einsum(test_case):
+    print(f"Performing {test_case["name"]}")
+    tensors = [SparseTensor.random_sparse_tensor(dims, 50) for dims in test_case["tensor_dims"]]
+
+    result = sparse_einsum(test_case["equation"], test_case["out_format"], *tensors)
+    expected = torch.einsum(test_case["equation"], *[t.to_dense() for t in tensors])
+
+    assert torch.allclose(
+        result.to_dense(), expected, atol=1e-4
+    ), f"The computed einsum is not as expected.\nExpected: {expected} \n\nGot {result}"
+
+
+# TODO : test on all continuous tensor test cases
+
+
+@pytest.mark.parametrize("out_format", ["s", "d"])
+@pytest.mark.parametrize(
+    "equation, tensors, formats",
+    [
+        # ("ik,kj->ij", [torch.randn(2, 4), torch.randn(4, 3)], ["ss", "ds"]),
+        # ("ijkl->ilkj", [torch.randn(6, 3, 8, 6)], ["ssss"]),
+        # ("i,i->i", [torch.randn(32), torch.randn(32)], ["s", "s"]),
+        # ("ijkl->ilkj", [torch.randn(16, 32, 48, 64)], ["ssss"]),
+        ("ik,kj->ij", [torch.randn(32, 16), torch.randn(16, 8)], ["ss", "ss"]),
+        ("id,dj->ij", [torch.randn(32, 16), torch.randn(16, 8)], ["ss", "ss"]),
+        ("xy,yz->xz", [torch.randn(32, 16), torch.randn(16, 8)], ["ss", "ss"]),
+        ("ik,kj->ij", [torch.randn(32, 16), torch.randn(16, 8)], ["ss", "ss"]),
+        ("ef,fj->ej", [torch.randn(32, 16), torch.randn(16, 8)], ["ss", "ss"]),
+        ("ik,kj->ij", [torch.randn(32, 16), torch.randn(16, 8)], ["ss", "ss"]),
+        ("ik,kj->ij", [torch.randn(32, 16), torch.randn(16, 8)], ["sd", "ss"]),
+        ("ik,kj->ij", [torch.randn(32, 16), torch.randn(16, 8)], ["ds", "ss"]),
+        ("ik,kj->ij", [torch.randn(32, 16), torch.randn(16, 8)], ["ds", "ds"]),
+        ("ik,kj->ij", [torch.randn(64, 64), torch.randn(64, 64)], ["ds", "ds"]),
+        ("ik,kj->ij", [torch.randn(128, 64), torch.randn(64, 32)], ["ds", "ds"]),
+        ("ik,kj->ij", [torch.randn(32, 16), torch.randn(16, 8)], ["ds", "ds"]),
+        ("ik,kj->ij", [torch.randn(32, 16), torch.randn(16, 8)], ["ds", "ds"]),
+        ("ik,kj->ij", [torch.randn(32, 16), torch.randn(16, 8)], ["ds", "ds"]),
+        ("ik,kj->ij", [torch.randn(32, 16), torch.randn(16, 8)], ["ds", "ds"]),
+        ("ik,kj->ij", [torch.randn(32, 16), torch.randn(16, 8)], ["ds", "ds"]),
+        ("ij,ik,kj->ij", [torch.randn(32, 8), torch.randn(32, 16), torch.randn(16, 8)], ["ss", "dd", "dd"]),
+        ("ij,ik,kj->ij", [torch.randn(32, 8), torch.randn(32, 16), torch.randn(16, 8)], ["ss", "sd", "dd"]),
+        ("ij,ik,kj->ij", [torch.randn(32, 8), torch.randn(32, 16), torch.randn(16, 8)], ["ss", "ds", "dd"]),
+        # ("ij,ik,kj->ij", [torch.randn(256, 256), torch.randn(256, 256), torch.randn(256, 256)], ["sd", "ds", "ds"]),
+        # ("i,i,i->i", [torch.randn(5), torch.randn(5), torch.randn(5)], ["s", "s", "d"]),
+        # ("i,i,i->i", [torch.randn(5), torch.randn(5), torch.randn(5)], ["d", "s", "d"]),
+        # ("i,i,i->i", [torch.randn(5), torch.randn(5), torch.randn(5)], ["d", "s", "s"]),
+        # ("i,i,i->i", [torch.randn(5), torch.randn(5), torch.randn(5)], ["s", "s", "s"]),
+        # ("i,i,i,i->i", [torch.randn(100), torch.randn(100), torch.randn(100), torch.randn(100)], ["s", "s", "s", "s"]),
+        # ("ij,ij->ij", [torch.randn(10, 10), torch.randn(10, 10)], ["ss", "ss"]),
+        # ("ij,ij,ij->ij", [torch.randn(10, 10), torch.randn(10, 10), torch.randn(10, 10)], ["ss", "ss", "ss"]),
+        # ("ij,ij,ij->ij", [torch.randn(10, 10), torch.randn(10, 10), torch.randn(10, 10)], ["ss", "ss", "sd"]),
+        # ("i,i,j,j->ij", [torch.randn(10), torch.randn(10), torch.randn(10), torch.randn(10)], ["s", "s", "s", "s"]),
+        # (
+        #     "ij,i,j,j->ij",
+        #     [torch.randn(10, 10), torch.randn(10), torch.randn(10), torch.randn(10)],
+        #     ["ss", "s", "s", "s"],
+        # ),
+        # ("i,i,j,j->ij", [torch.randn(10), torch.randn(10), torch.randn(10), torch.randn(10)], ["s", "s", "d", "s"]),
+        # ("i,i,j,j->ij", [torch.randn(10), torch.randn(10), torch.randn(10), torch.randn(10)], ["s", "s", "d", "d"]),
+        # ("ikl,lj,kj->ij", [torch.randn(32, 32, 32), torch.randn(32, 32), torch.randn(32, 32)], ["sss", "dd", "dd"]),
+        # ("ikl,ij,lj->kj", [torch.randn(32, 32, 32), torch.randn(32, 32), torch.randn(32, 32)], ["sss", "dd", "dd"]),
+        # ("ikl,ij,kj->lj", [torch.randn(32, 32, 32), torch.randn(32, 32), torch.randn(32, 32)], ["sss", "dd", "dd"]),
+        # ("ikl,lj,kj->ij", [torch.randn(32, 32, 32), torch.randn(32, 32), torch.randn(32, 32)], ["sss", "sd", "dd"]),
+        # ("ikl,lj,kj->ij", [torch.randn(32, 32, 32), torch.randn(32, 32), torch.randn(32, 32)], ["sss", "sd", "sd"]),
+        # ("ikl,lj,kj->ij", [torch.randn(16, 16, 16), torch.randn(16, 16), torch.randn(16, 16)], ["sss", "ss", "ss"]),
+        # ("ii->i", [torch.randn(32, 32)], ["ss"]),
+        # ("iii->i", [torch.randn(32, 32, 32)], ["sss"]),
+        # ("iij->ij", [torch.randn(32, 32, 32)], ["ssd"]),
+        # ("ii,jj->ij", [torch.randn(32, 32), torch.randn(32, 32)], ["ss", "ss"]),
+        # ("ij,ijk->i", [torch.randn(16, 16), torch.randn(16, 16, 16)], ["sd", "dss"]),
+        # ("ij,ijk->i", [torch.randn(16, 16), torch.randn(16, 16, 16)], ["ss", "sss"]),
+        # ("ij,ijk->i", [torch.randn(16, 16), torch.randn(16, 16, 16)], ["sd", "sdd"]),
+        # ("ik,k->i", [torch.randn(16, 16), torch.randn(16)], ["ss", "d"]),
+        # ("ik,k->i", [torch.randn(16, 16), torch.randn(16)], ["sd", "d"]),
+        # ("ik,k->i", [torch.randn(16, 16), torch.randn(16)], ["ds", "s"]),
+        # ("ik,k->i", [torch.randn(16, 16), torch.randn(16)], ["ss", "s"]),
+        # ("i->", [torch.randn(32)], ["s"]),
+        # ("ik,k->", [torch.randn(16, 32), torch.randn(32)], ["ss", "s"]),
+        # ("ik,k->", [torch.randn(16, 32), torch.randn(32)], ["sd", "s"]),
+        # ("ik,kj->", [torch.randn(16, 32), torch.randn(32, 24)], ["ss", "ss"]),
+        # ("ij,ik,kj->", [torch.randn(16, 24), torch.randn(16, 32), torch.randn(32, 24)], ["ss", "ss", "ss"]),
+        # ("ii->", [torch.randn(16, 16)], ["ss"]),
+        # ("ij->", [torch.randn(16, 16)], ["ss"]),
+    ],
+)
+def test_continuous_cases(equation, tensors, formats, out_format):
+    # Construct sparse tensors from the given dense ones and format info
+    def convert_format(fmt):
+        return [DimensionFormat.SPARSE if f == "s" else DimensionFormat.DENSE for f in fmt]
+
+    sparse_tensors = [SparseTensor.from_dense(t, convert_format(fmt)) for t, fmt in zip(tensors, formats)]
+    # print("\n\n\nGOON")
+    # print(tensors)
+    # print("\nTHEN\n", sparse_tensors)
+
+    # Extract output format from the formats of the inputs if needed
+    # Or infer based on `equation`, for now assume same format as first tensor
+    out_format = out_format * len(parse_einsum_equation(equation)[1])
+
+    result = sparse_einsum(equation, out_format, *sparse_tensors)
+    expected = torch.einsum(equation, *tensors)
+
+    assert torch.allclose(
+        result.to_dense(), expected, atol=1e-4
+    ), f"Einsum failed for {equation}\nExpected:\n{expected}\n\nGot:\n{result.to_dense()}"
