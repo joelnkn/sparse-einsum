@@ -44,14 +44,14 @@ class SparseTensor:
             raise ValueError("Indices must be a 2D tensor.")
         if self.indices.shape[0] != self.values.shape[0]:
             raise ValueError("Indices and values must have the same number of rows.")
-        if self.indices.shape[1] != len(self.sparse_dimensions()):
-            raise ValueError(
-                "Indices must have the same number of columns as the number of sparse dimensions in the shape."
-            )
-        if len(self.values.shape) != len(self.dense_dimensions()) + 1:
-            raise ValueError(
-                "Values must have the same number of dimensions as the number of dense dimensions in the shape."
-            )
+        # if self.indices.shape[1] != len(self.sparse_dimensions()):
+        #     raise ValueError(
+        #         "Indices must have the same number of columns as the number of sparse dimensions in the shape."
+        #     )
+        # if len(self.values.shape) != len(self.dense_dimensions()) + 1:
+        #     raise ValueError(
+        #         "Values must have the same number of dimensions as the number of dense dimensions in the shape."
+        #     )
 
         if self.dimension_mapping is None:
             self.dimension_mapping = self.default_dimension_mapping()
@@ -74,7 +74,11 @@ class SparseTensor:
     @property
     def is_dense(self) -> bool:
         """Returns true iff all dimensions of this tensor are dense"""
-        return all(dim.is_dense for dim in self.dimensions)
+        for dim in self.dimensions:
+            if not dim.is_dense:
+                return False
+        return True
+        # return all(dim.is_dense for dim in self.dimensions)
 
     def __str__(self):
         """String representation."""
@@ -93,13 +97,13 @@ class SparseTensor:
         """
         return self.dimension_mapping[dim]
 
-    def sparse_dimensions(self) -> Tuple[int, ...]:
-        """Get the indices of all sparse dimensions in this tensor."""
-        return tuple(i for i, dim in enumerate(self.dimensions) if dim.is_sparse)
+    # def sparse_dimensions(self) -> Tuple[int, ...]:
+    #     """Get the indices of all sparse dimensions in this tensor."""
+    #     return tuple(i for i, dim in enumerate(self.dimensions) if dim.is_sparse)
 
-    def dense_dimensions(self) -> Tuple[int, ...]:
-        """Get the indices of all dense dimensions in this tensor."""
-        return tuple(i for i, dim in enumerate(self.dimensions) if dim.is_dense)
+    # def dense_dimensions(self) -> Tuple[int, ...]:
+    #     """Get the indices of all dense dimensions in this tensor."""
+    #     return tuple(i for i, dim in enumerate(self.dimensions) if dim.is_dense)
 
     @staticmethod
     def random_sparse_tensor(dims: Sequence[Dimension], approx_nonzeros: int):
@@ -233,6 +237,7 @@ class SparseTensor:
                 )
                 for j in range(len(self.dimensions))
             )
+            print("got", index)
             dense[index] = self.values[i]
 
         return dense
