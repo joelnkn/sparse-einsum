@@ -313,7 +313,7 @@ def _two_operand_einsum(
             a_dense_index[i] = f"B_crd[{b_nnz}, {b_sparse_dims[dim]}]"
         else:
             a_dense_index[i] = dim
-    eqn += f"A_val[{",".join(a_dense_index)}]"
+    eqn += f"A_val[{','.join(a_dense_index)}]"
     eqn += " * "
 
     b_dense_index = [None] * len(b_tensor.values.shape)
