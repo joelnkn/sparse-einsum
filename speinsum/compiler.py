@@ -339,7 +339,7 @@ def _two_operand_einsum(
             unique_indices, gather_idx = torch.unique(out_indices, dim=0, return_inverse=True)
         else:
             unique_indices, gather_idx = torch.zeros((1, 0)), torch.zeros((out_indices.shape[0],), dtype=torch.long)
-        coalesce_eqn = f"Out[{",".join([f"G[{nnz_index}]"] + dense_dims)}] += {eqn_lhs}"
+        coalesce_eqn = f"Out[{','.join([f"G[{nnz_index}]"] + dense_dims)}] += {eqn_lhs}"
         dense_sizes[0] = unique_indices.shape[0]
         out_val = einsum_gs(coalesce_eqn, Out_val=out_val, G=gather_idx, Out=torch.zeros(dense_sizes))
         out_indices = unique_indices
@@ -558,10 +558,10 @@ def sparse_einsum(equation: str, out_format: str, *tensors: SparseTensor, table=
     # produces: Out_val[p, i] = T0[i] * T1[i]
     # The single p on the lhs is forbidden, hence special case logic.
     if einsum_is_dense:
-        eqn_lhs = f"Out_val[{", ".join(einsum_lhs_index)}]"
+        eqn_lhs = f"Out_val[{', '.join(einsum_lhs_index)}]"
         einsum_data["Out_val"] = einsum_data["Out_val"].squeeze(0)
     else:
-        eqn_lhs = f"Out_val[{", ".join([f"G[{nnz_index}]"] + einsum_lhs_index)}]"
+        eqn_lhs = f"Out_val[{', '.join([f"G[{nnz_index}]"] + einsum_lhs_index)}]"
 
     eqn_rhs = []
     for i, tensor in enumerate(tensors):
@@ -593,10 +593,10 @@ def sparse_einsum(equation: str, out_format: str, *tensors: SparseTensor, table=
             # remove the 0th index dimension as it is fixed at 0
             del tensor_index[0]
 
-        tensor_eqn = f"{tensor_name}[{",".join(tensor_index)}]"
+        tensor_eqn = f"{tensor_name}[{','.join(tensor_index)}]"
         eqn_rhs.append(tensor_eqn)
 
-    gather_eqn = f"{eqn_lhs} += {" * ".join(eqn_rhs)}"
+    gather_eqn = f"{eqn_lhs} += {' * '.join(eqn_rhs)}"
     # print(gather_eqn)
     # print(einsum_data)
     out_val = einsum_gs(gather_eqn, **einsum_data)
