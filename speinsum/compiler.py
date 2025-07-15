@@ -303,7 +303,7 @@ def _two_operand_einsum(
 
     # einsum_gs construction
     tensors["Out_val"] = torch.zeros(dense_sizes)
-    eqn_lhs = f"Out_val[{", ".join([nnz_index] + dense_dims)}]"
+    eqn_lhs = f"Out_val[{', '.join([nnz_index] + dense_dims)}]"
     eqn = eqn_lhs + " += "
 
     a_dense_index = [None] * len(a_tensor.values.shape)
