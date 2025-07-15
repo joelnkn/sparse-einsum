@@ -561,7 +561,8 @@ def sparse_einsum(equation: str, out_format: str, *tensors: SparseTensor, table=
         eqn_lhs = f"Out_val[{', '.join(einsum_lhs_index)}]"
         einsum_data["Out_val"] = einsum_data["Out_val"].squeeze(0)
     else:
-        eqn_lhs = f"Out_val[{', '.join([f"G[{nnz_index}]"] + einsum_lhs_index)}]"
+        xx = f"G[{nnz_index}]"
+        eqn_lhs = f"Out_val[{', '.join([xx] + einsum_lhs_index)}]"
 
     eqn_rhs = []
     for i, tensor in enumerate(tensors):
