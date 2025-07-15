@@ -5,7 +5,7 @@ Core compiler implementation for sparse einsum operations.
 from typing import List, Tuple
 from collections import defaultdict
 import torch
-from tiql import intersect
+from tiql import intersect, table_intersect
 from .indirecteinsum import einsum_gs
 from .sparse_tensor import SparseTensor
 from .typing import DimensionFormat, Dimension
@@ -375,7 +375,7 @@ def _two_operand_einsum(
 #                sds,d
 
 
-def sparse_einsum(equation: str, out_format: str, *tensors: SparseTensor) -> SparseTensor:
+def sparse_einsum(equation: str, out_format: str, *tensors: SparseTensor, table=False) -> SparseTensor:
     """Execute a sparse einsum operation.
 
     Args:
@@ -437,13 +437,23 @@ def sparse_einsum(equation: str, out_format: str, *tensors: SparseTensor) -> Spa
 
         # TODO: implement chains of equality in tiql, ie A == B == C. for now, we have to do A == B, A == C
         # intersect_queries.append(" == ".join(query))
-        intersect_queries.extend(f"{query[0]} == {q}" for q in query)
+        intersect_queries.append(f"{query[0]}")
+        intersect_queries.extend(f"{query[0]} == {q}" for q in query[1:])
+        # intersect_queries.extend(f"{query[0]} == {q}" for q in query)
 
     if intersect_queries:
+        # A[i]; -> torch.arange()
+
         intersect_query = ", ".join(intersect_queries)
-        print("Intersection:\n", intersect_query)
+        # print("Intersection:\n", intersect_query)
         # print("with data", intersect_data)
-        int_idx = intersect(intersect_query, **intersect_data)
+        if table:
+            int_idx = table_intersect(intersect_query, **intersect_data)
+        else:
+            int_idx = intersect(intersect_query, **intersect_data)
+        # index_table = tensors[0].indices[:, 0].unsqueeze(0) == tensors[1].indices[:, 0].unsqueeze(1)
+        # int_idx = torch.nonzero(index_table)
+        # int_idx = torch.zeros((1, 0), dtype=torch.long)
     else:
         int_idx = torch.zeros(1, 0, dtype=torch.long)
 
@@ -587,7 +597,7 @@ def sparse_einsum(equation: str, out_format: str, *tensors: SparseTensor) -> Spa
         eqn_rhs.append(tensor_eqn)
 
     gather_eqn = f"{eqn_lhs} += {" * ".join(eqn_rhs)}"
-    print(gather_eqn)
+    # print(gather_eqn)
     # print(einsum_data)
     out_val = einsum_gs(gather_eqn, **einsum_data)
     # print("out was", out_val, "\n\n")
@@ -628,5 +638,4 @@ def sparse_einsum(equation: str, out_format: str, *tensors: SparseTensor) -> Spa
             dimension_mapping[i] = einsum_dense_dims.index(idx)
             dimension_format.append(Dimension(size=index_sizes[idx], format=DimensionFormat.DENSE))
 
-    print(out_indices.size(), dimension_format)
     return SparseTensor(out_indices, out_val, dimension_format, dimension_mapping)

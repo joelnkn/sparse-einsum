@@ -237,7 +237,6 @@ class SparseTensor:
                 )
                 for j in range(len(self.dimensions))
             )
-            print("got", index)
             dense[index] = self.values[i]
 
         return dense

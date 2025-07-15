@@ -1,0 +1,17 @@
+TIQL:
+- unique consecutive * 7
+- nonzero
+- repeat interleave
+- local_scalar_dense
+- repeat interleave
+- repeat interleave
+- nonzero
+- repeat interleave
+- nonzero
+
+
+about ~14 of them are coming from the implementation of intersect
+
+SPEINSUM:
+
+none
