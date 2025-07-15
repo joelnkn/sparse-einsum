@@ -1,6 +1,6 @@
 import pytest
 import torch
-from speinsum.compiler import _coalesce_einsum_indices, _two_operand_einsum, sparse_einsum, parse_einsum_equation
+from speinsum.compiler import sparse_einsum
 from speinsum.sparse_tensor import SparseTensor
 from speinsum.typing import Dimension, DimensionFormat
 
