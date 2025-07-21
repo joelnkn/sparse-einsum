@@ -5,7 +5,7 @@ from speinsum.compiler import sparse_einsum
 from speinsum.sparse_tensor import SparseTensor
 from speinsum.typing import Dimension, DimensionFormat
 
-# torch._dynamo.config.capture_dynamic_output_shape_ops = True
+torch._dynamo.config.capture_dynamic_output_shape_ops = True
 
 # TORCH_LOGS_FORMAT=“%(levelname)s:%(message)s” TORCH_LOGS="graph_breaks" python test.py
 # TORCH_COMPILE_DEBUG=1 python test.py

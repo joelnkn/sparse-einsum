@@ -464,9 +464,7 @@ def sparse_einsum(equation: str, out_format: str, *tensors: SparseTensor, table=
             #     ).reshape(len(table_run.shape), -1)
         else:
             int_idx = intersect(intersect_query, **intersect_data)
-        # index_table = tensors[0].indices[:, 0].unsqueeze(0) == tensors[1].indices[:, 0].unsqueeze(1)
-        # int_idx = torch.nonzero(index_table)
-        # int_idx = torch.zeros((1, 0), dtype=torch.long)
+
     else:
         int_idx = torch.zeros(1, 0, dtype=torch.long)
 
