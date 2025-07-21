@@ -1,12 +1,14 @@
 import pytest
 import torch
+import torch._inductor.utils
 from speinsum.compiler import sparse_einsum
 from speinsum.sparse_tensor import SparseTensor
 from speinsum.typing import Dimension, DimensionFormat
 
-torch._dynamo.config.capture_dynamic_output_shape_ops = True
+# torch._dynamo.config.capture_dynamic_output_shape_ops = True
 
 # TORCH_LOGS_FORMAT=“%(levelname)s:%(message)s” TORCH_LOGS="graph_breaks" python test.py
+# TORCH_COMPILE_DEBUG=1 python test.py
 
 # TODO:
 # - table intersect, exactly 1 graph break
@@ -18,7 +20,7 @@ test_case = {
     "name": "sparse_elementwise_mul",
     "equation": "i,i->i",
     "out_format": "d",
-    "tensor_dims": [[Dimension(10, DimensionFormat.SPARSE)], [Dimension(10, DimensionFormat.DENSE)]],
+    "tensor_dims": [[Dimension(10, DimensionFormat.SPARSE)], [Dimension(10, DimensionFormat.SPARSE)]],
 }
 
 
@@ -35,7 +37,8 @@ test_case = {
 # }
 tensors = [SparseTensor.random_sparse_tensor(dims, 50) for dims in test_case["tensor_dims"]]
 
-compiled_einsum = torch.compile(sparse_einsum)
-# result = sparse_einsum(test_case["equation"], test_case["out_format"], *tensors)
-result = compiled_einsum(test_case["equation"], test_case["out_format"], *tensors)
-expected = torch.einsum(test_case["equation"], *[t.to_dense() for t in tensors])
+with torch._inductor.utils.fresh_inductor_cache():
+    compiled_einsum = torch.compile(sparse_einsum)
+    expected = torch.einsum(test_case["equation"], *[t.to_dense() for t in tensors])
+    result = compiled_einsum(test_case["equation"], test_case["out_format"], *tensors, table=True)
+    # result = sparse_einsum(test_case["equation"], test_case["out_format"], *tensors)
