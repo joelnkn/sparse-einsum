@@ -116,7 +116,7 @@ test_cases = [
 ]
 
 for test_case in test_cases:
-    print(f"\nBenchmarking {test_case["name"]}")
+    print(f"\nBenchmarking {test_case['name']}")
     n = 10e5
     tensors = [SparseTensor.random_sparse_tensor(dims, n * 0.1) for dims in test_case["tensor_dims"]]
 
