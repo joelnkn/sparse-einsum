@@ -42,3 +42,31 @@ with torch._inductor.utils.fresh_inductor_cache():
     expected = torch.einsum(test_case["equation"], *[t.to_dense() for t in tensors])
     result = compiled_einsum(test_case["equation"], test_case["out_format"], *tensors, table=True)
     # result = sparse_einsum(test_case["equation"], test_case["out_format"], *tensors)
+
+
+test_case = {
+    "name": "sparse_elementwise_mul",
+    "equation": "i,i->i",
+    "out_format": "d",
+    "tensor_dims": [[Dimension(10, DimensionFormat.SPARSE)], [Dimension(10, DimensionFormat.SPARSE)]],
+}
+
+
+def get_tensors(n: int, **kwargs):
+    test_case = {
+        "name": "sparse_elementwise_mul",
+        "equation": "i,i->i",
+        "out_format": "d",
+        "tensor_dims": [[Dimension(n, DimensionFormat.SPARSE)], [Dimension(n, DimensionFormat.SPARSE)]],
+    }
+    return [SparseTensor.random_sparse_tensor(dims, 50) for dims in test_case["tensor_dims"]]
+
+
+def sparse_einsum_test(compile: bool, **kwargs):
+    tensors = kwargs["tensors"]
+    with torch._inductor.utils.fresh_inductor_cache():
+        if compile:
+            compiled_einsum = torch.compile(sparse_einsum)
+            result = compiled_einsum(test_case["equation"], test_case["out_format"], *tensors, table=True)
+        else:
+            result = sparse_einsum(test_case["equation"], test_case["out_format"], *tensors)

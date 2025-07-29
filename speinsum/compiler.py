@@ -386,7 +386,7 @@ def sparse_einsum(equation: str, out_format: str, *tensors: SparseTensor, table=
     Returns:
         Output tensor
     """
-    table = True  # TODO: remove
+    # table = True  # TODO: remove
     tensor_eqns, out_eqn = parse_einsum_equation(equation)
     # Step 0: Preprocess index sets and sizes
     # ij,j -> i
@@ -449,19 +449,19 @@ def sparse_einsum(equation: str, out_format: str, *tensors: SparseTensor, table=
         # print("Intersection:\n", intersect_query)
         # print("with data", intersect_data)
         if table:
-            int_idx = table_intersect(intersect_query, **intersect_data)
+            # int_idx = table_intersect(intersect_query, **intersect_data)
 
-            # table_run, dynamic = table_intersect(intersect_query, **intersect_data)
-            # if dynamic:
-            #     int_idx = torch.nonzero(table_run).T
-            # else:
-            #     int_idx = torch.stack(
-            #         torch.meshgrid(
-            #             *[torch.arange(s) for s in table_run.shape],
-            #             indexing="ij",
-            #         ),
-            #         dim=0,
-            #     ).reshape(len(table_run.shape), -1)
+            table_run, dynamic = table_intersect(intersect_query, **intersect_data)
+            if dynamic:
+                int_idx = torch.nonzero(table_run).T
+            else:
+                int_idx = torch.stack(
+                    torch.meshgrid(
+                        *[torch.arange(s) for s in table_run.shape],
+                        indexing="ij",
+                    ),
+                    dim=0,
+                ).reshape(len(table_run.shape), -1)
         else:
             int_idx = intersect(intersect_query, **intersect_data)
 
