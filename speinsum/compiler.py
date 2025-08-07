@@ -5,7 +5,7 @@ Core compiler implementation for sparse einsum operations.
 from typing import List, Tuple
 from collections import defaultdict
 import torch
-from tiql import intersect, table_intersect
+from tiql import intersect, table_intersect, simple_intersect
 from .indirecteinsum import einsum_gs
 from .sparse_tensor import SparseTensor
 from .typing import DimensionFormat, Dimension
@@ -433,14 +433,11 @@ def sparse_einsum(equation: str, out_format: str, *tensors: SparseTensor, table=
             query.append(f"T{tens}_{dim}[i{tens}]")
             intersect_data[f"T{tens}_{dim}"] = tensors[tens].indices[:, dim]
 
-        # if len(dim_list) == 1:
-        #     query *= 2  # hack in unconstrained query
-
-        # TODO: implement chains of equality in tiql, ie A == B == C. for now, we have to do A == B, A == C
-        # intersect_queries.append(" == ".join(query))
-        intersect_queries.append(f"{query[0]}")
-        intersect_queries.extend(f"{query[0]} == {q}" for q in query[1:])
-        # intersect_queries.extend(f"{query[0]} == {q}" for q in query)
+        if table:
+            intersect_queries.append(f"{query[0]}")
+            intersect_queries.extend(f"{query[0]} == {q}" for q in query[1:])
+        else:
+            intersect_queries.append(" == ".join(query))
 
     if intersect_queries:
         # A[i]; -> torch.arange()
@@ -452,6 +449,7 @@ def sparse_einsum(equation: str, out_format: str, *tensors: SparseTensor, table=
             # int_idx = table_intersect(intersect_query, **intersect_data)
 
             table_run, dynamic = table_intersect(intersect_query, **intersect_data)
+            # move nonzero outside tiql as a hack to get around graph break errors
             if dynamic:
                 int_idx = torch.nonzero(table_run).T
             else:
@@ -463,10 +461,18 @@ def sparse_einsum(equation: str, out_format: str, *tensors: SparseTensor, table=
                     dim=0,
                 ).reshape(len(table_run.shape), -1)
         else:
-            int_idx = intersect(intersect_query, **intersect_data)
+            # print(intersect_query)
+
+            int_idx = simple_intersect(intersect_query, **intersect_data)
+            # expected = intersect(intersect_query, **intersect_data)
+            # int_idx = intersect(intersect_query, **intersect_data)
+
+            # print(expected, int_idx)
 
     else:
         int_idx = torch.zeros(1, 0, dtype=torch.long)
+
+    # print(f"Intersect produced {int_idx.shape} nnz pair")
 
     j = 0
     tensor_idx_to_int_idx_mapping = {}  # map each tensor's index in int_idx to a dimension of int_idx

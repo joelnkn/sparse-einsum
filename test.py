@@ -40,7 +40,7 @@ tensors = [SparseTensor.random_sparse_tensor(dims, 50) for dims in test_case["te
 with torch._inductor.utils.fresh_inductor_cache():
     compiled_einsum = torch.compile(sparse_einsum)
     expected = torch.einsum(test_case["equation"], *[t.to_dense() for t in tensors])
-    result = compiled_einsum(test_case["equation"], test_case["out_format"], *tensors, table=True)
+    result = compiled_einsum(test_case["equation"], test_case["out_format"], *tensors, table=False)
     # result = sparse_einsum(test_case["equation"], test_case["out_format"], *tensors)
 
 

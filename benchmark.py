@@ -86,12 +86,12 @@ test_cases = [
         "out_format": "d",
         "tensor_dims": [[Dimension(10, DimensionFormat.SPARSE)], [Dimension(10, DimensionFormat.SPARSE)]],
     },
-    {
-        "name": "dense_elementwise_mul",
-        "equation": "i,i->i",
-        "out_format": "d",
-        "tensor_dims": [[Dimension(10, DimensionFormat.DENSE)], [Dimension(10, DimensionFormat.DENSE)]],
-    },
+    # {
+    #     "name": "dense_elementwise_mul",
+    #     "equation": "i,i->i",
+    #     "out_format": "d",
+    #     "tensor_dims": [[Dimension(10, DimensionFormat.DENSE)], [Dimension(10, DimensionFormat.DENSE)]],
+    # },
     {
         "name": "sparse_dense_elementwise_mul",
         "equation": "i,i->i",
@@ -115,10 +115,23 @@ test_cases = [
     },
 ]
 
+
+# sorted + unique
+
+# index intersect -> data
+# data, -> index
+# data + index
+
+
 for test_case in test_cases:
-    print(f"\nBenchmarking {test_case['name']}")
-    n = 10e5
-    tensors = [SparseTensor.random_sparse_tensor(dims, n * 0.1) for dims in test_case["tensor_dims"]]
+    print(f"\nBenchmarking {test_case['name']}: {test_case['equation']}\n{test_case['tensor_dims']}")
+    density = 0.1
+    n = 10e4
+    for dim_list in test_case["tensor_dims"]:
+        for dim in dim_list:
+            dim.size = int(n)
+
+    tensors = [SparseTensor.random_sparse_tensor(dims, n * density) for dims in test_case["tensor_dims"]]
 
     # Eager mode function
     eager_func = run_sparse_einsum
