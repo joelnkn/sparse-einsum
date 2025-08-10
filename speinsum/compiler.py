@@ -388,6 +388,7 @@ def sparse_einsum(equation: str, out_format: str, *tensors: SparseTensor, table=
     """
     # table = True  # TODO: remove
     tensor_eqns, out_eqn = parse_einsum_equation(equation)
+    device = tensors[0].indices.device
     # Step 0: Preprocess index sets and sizes
     # ij,j -> i
     # ss,s -> s
@@ -470,7 +471,7 @@ def sparse_einsum(equation: str, out_format: str, *tensors: SparseTensor, table=
             # print(expected, int_idx)
 
     else:
-        int_idx = torch.zeros(1, 0, dtype=torch.long)
+        int_idx = torch.zeros(1, 0, dtype=torch.long, device=device)
 
     # print(f"Intersect produced {int_idx.shape} nnz pair")
 
@@ -499,7 +500,7 @@ def sparse_einsum(equation: str, out_format: str, *tensors: SparseTensor, table=
     if out_indices_columns:
         out_indices = torch.stack(out_indices_columns, dim=1)
     else:
-        out_indices = torch.zeros((int_idx.shape[1], 0), dtype=torch.long)
+        out_indices = torch.zeros((int_idx.shape[1], 0), dtype=torch.long, device=device)
     # Step 3: Perform gather-scatter einsum
     nnz_index = "p"
 
@@ -548,8 +549,8 @@ def sparse_einsum(equation: str, out_format: str, *tensors: SparseTensor, table=
     if out_indices.shape[1] > 0:
         out_indices, gather_idx = torch.unique(out_indices, dim=0, return_inverse=True)
     else:
-        out_indices, gather_idx = torch.zeros((1, 0), dtype=torch.long), torch.zeros(
-            (out_indices.shape[0],), dtype=torch.long
+        out_indices, gather_idx = torch.zeros((1, 0), dtype=torch.long, device=device), torch.zeros(
+            (out_indices.shape[0],), dtype=torch.long, device=device
         )
 
     einsum_data["G"] = gather_idx
@@ -557,7 +558,7 @@ def sparse_einsum(equation: str, out_format: str, *tensors: SparseTensor, table=
     # dimensions that are dense in the input or dense in the output
     einsum_dense_dims = [ind for i, ind in enumerate(out_eqn) if out_format[i] == "d" or ind in input_dense]
     einsum_dense_sizes = [out_indices.shape[0]] + [index_sizes[ind] for ind in einsum_dense_dims]
-    einsum_data["Out_val"] = torch.zeros(einsum_dense_sizes)
+    einsum_data["Out_val"] = torch.zeros(einsum_dense_sizes, device=device)
 
     einsum_lhs_index = []
     for ind in einsum_dense_dims:
@@ -635,7 +636,7 @@ def sparse_einsum(equation: str, out_format: str, *tensors: SparseTensor, table=
             out_indices = torch.cat(
                 [
                     out_indices.repeat_interleave(dense_size, dim=0),
-                    torch.arange(dense_size).repeat(out_indices.shape[0]).unsqueeze(1),
+                    torch.arange(dense_size, device=device).repeat(out_indices.shape[0]).unsqueeze(1),
                 ],
                 dim=1,
             )

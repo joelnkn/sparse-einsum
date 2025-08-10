@@ -131,7 +131,7 @@ for test_case in test_cases:
         for dim in dim_list:
             dim.size = int(n)
 
-    tensors = [SparseTensor.random_sparse_tensor(dims, n * density) for dims in test_case["tensor_dims"]]
+    tensors = [SparseTensor.random_sparse_tensor(dims, n * density, device=device) for dims in test_case["tensor_dims"]]
 
     # Eager mode function
     eager_func = run_sparse_einsum

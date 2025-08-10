@@ -106,7 +106,7 @@ class SparseTensor:
     #     return tuple(i for i, dim in enumerate(self.dimensions) if dim.is_dense)
 
     @staticmethod
-    def random_sparse_tensor(dims: Sequence[Dimension], approx_nonzeros: int):
+    def random_sparse_tensor(dims: Sequence[Dimension], approx_nonzeros: int, device):
         """
         Generates a random sparse tensor given a list of Dimension objects.
 
@@ -139,17 +139,17 @@ class SparseTensor:
 
         # Generate sparse indices with shape (num_sparse_dims, actual_nnz)
         if sparse_sizes:
-            index_tensors = [torch.randint(0, size, (sample_count,)) for size in sparse_sizes]
+            index_tensors = [torch.randint(0, size, (sample_count,), device=device) for size in sparse_sizes]
             raw_indices = torch.stack(index_tensors, dim=1)
             indices = torch.unique(raw_indices, dim=0)
         else:
-            indices = torch.zeros((1, 0))
+            indices = torch.zeros((1, 0), device=device)
 
         nnz = indices.size(0)
 
         # Generate values with shape (nnz, *dense_sizes)
         values_shape = (nnz, *dense_sizes)
-        values = torch.randn(values_shape)
+        values = torch.randn(values_shape, device=device)
 
         # Build mapping: maps from original dim index → storage index
         mapping: Dict[int, int] = {}

@@ -516,7 +516,9 @@ def test_coalesce_einsum_indices(test_case):
 )
 def test_sparse_einsum(test_case):
     print(f"Performing {test_case["name"]}")
-    tensors = [SparseTensor.random_sparse_tensor(dims, 50) for dims in test_case["tensor_dims"]]
+    tensors = [
+        SparseTensor.random_sparse_tensor(dims, 50, device=torch.device("cpu")) for dims in test_case["tensor_dims"]
+    ]
 
     # compiled_einsum = torch.compile(sparse_einsum)
     result = sparse_einsum(test_case["equation"], test_case["out_format"], *tensors)
