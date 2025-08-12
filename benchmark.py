@@ -84,7 +84,38 @@ test_cases = [
         "name": "sparse_elementwise_mul",
         "equation": "i,i->i",
         "out_format": "d",
-        "tensor_dims": [[Dimension(10, DimensionFormat.SPARSE)], [Dimension(10, DimensionFormat.SPARSE)]],
+        "tensor_dims": [[Dimension(1, DimensionFormat.SPARSE)], [Dimension(1, DimensionFormat.SPARSE)]],
+        "sizes": list(range(3, 6)),
+    },
+    # {
+    #     "name": "spmv",
+    #     "equation": "ik,k->i",
+    #     "out_format": "d",
+    #     "tensor_dims": [
+    #         [Dimension(1, DimensionFormat.DENSE), Dimension(1, DimensionFormat.SPARSE)],
+    #         [Dimension(1, DimensionFormat.DENSE)],
+    #     ],
+    #     "sizes": list(range(2, 4)),
+    # },
+    # {
+    #     "name": "smpmm",
+    #     "equation": "ik,kj->ij",
+    #     "out_format": "dd",
+    #     "tensor_dims": [
+    #         [Dimension(1, DimensionFormat.SPARSE), Dimension(1, DimensionFormat.SPARSE)],
+    #         [Dimension(1, DimensionFormat.DENSE), Dimension(1, DimensionFormat.DENSE)],
+    #     ],
+    #     "sizes": list(range(2, 4)),
+    # },
+    {
+        "name": "spmspm",
+        "equation": "ik,kj->ij",
+        "out_format": "dd",
+        "tensor_dims": [
+            [Dimension(1, DimensionFormat.SPARSE), Dimension(1, DimensionFormat.SPARSE)],
+            [Dimension(1, DimensionFormat.SPARSE), Dimension(1, DimensionFormat.SPARSE)],
+        ],
+        "sizes": list(range(3, 6)),
     },
     # {
     #     "name": "dense_elementwise_mul",
@@ -92,27 +123,27 @@ test_cases = [
     #     "out_format": "d",
     #     "tensor_dims": [[Dimension(10, DimensionFormat.DENSE)], [Dimension(10, DimensionFormat.DENSE)]],
     # },
-    {
-        "name": "sparse_dense_elementwise_mul",
-        "equation": "i,i->i",
-        "out_format": "s",
-        "tensor_dims": [[Dimension(10, DimensionFormat.SPARSE)], [Dimension(10, DimensionFormat.DENSE)]],
-    },
-    {
-        "name": "sparse_dense_broadcast_mul",
-        "equation": "ij,j->ij",
-        "out_format": "sd",
-        "tensor_dims": [
-            [Dimension(8, DimensionFormat.SPARSE), Dimension(4, DimensionFormat.DENSE)],
-            [Dimension(4, DimensionFormat.DENSE)],
-        ],
-    },
-    {
-        "name": "sparse_sparse_reduce_sum",
-        "equation": "ij->i",
-        "out_format": "s",
-        "tensor_dims": [[Dimension(5, DimensionFormat.SPARSE), Dimension(6, DimensionFormat.SPARSE)]],
-    },
+    # {
+    #     "name": "sparse_dense_elementwise_mul",
+    #     "equation": "i,i->i",
+    #     "out_format": "s",
+    #     "tensor_dims": [[Dimension(10, DimensionFormat.SPARSE)], [Dimension(10, DimensionFormat.DENSE)]],
+    # },
+    # {
+    #     "name": "sparse_dense_broadcast_mul",
+    #     "equation": "ij,j->ij",
+    #     "out_format": "sd",
+    #     "tensor_dims": [
+    #         [Dimension(8, DimensionFormat.SPARSE), Dimension(4, DimensionFormat.DENSE)],
+    #         [Dimension(4, DimensionFormat.DENSE)],
+    #     ],
+    # },
+    # {
+    #     "name": "sparse_sparse_reduce_sum",
+    #     "equation": "ij->i",
+    #     "out_format": "s",
+    #     "tensor_dims": [[Dimension(5, DimensionFormat.SPARSE), Dimension(6, DimensionFormat.SPARSE)]],
+    # },
 ]
 
 
@@ -124,33 +155,40 @@ test_cases = [
 
 
 for test_case in test_cases:
-    print(f"\nBenchmarking {test_case['name']}: {test_case['equation']}\n{test_case['tensor_dims']}")
-    density = 0.1
-    n = 10e4
-    for dim_list in test_case["tensor_dims"]:
-        for dim in dim_list:
-            dim.size = int(n)
+    print(f"\n\nBenchmarking {test_case['name']}: {test_case['equation']}\n{test_case['tensor_dims']}")
 
-    tensors = [SparseTensor.random_sparse_tensor(dims, n * density, device=device) for dims in test_case["tensor_dims"]]
+    for log_size in test_case["sizes"]:
+        density = 0.1
+        n = 10**log_size
+        print(f"Running at size=10e{log_size} and density={density}")
+        for dim_list in test_case["tensor_dims"]:
+            for dim in dim_list:
+                dim.size = int(n)
 
-    # Eager mode function
-    eager_func = run_sparse_einsum
+        tensors = [
+            SparseTensor.random_sparse_tensor(dims, n * density, device=device) for dims in test_case["tensor_dims"]
+        ]
 
-    # Compiled function (with torch.compile)
-    compiled_func = torch.compile(run_sparse_einsum)
+        # Eager mode function
+        eager_func = run_sparse_einsum
 
-    # Run benchmarks
-    table = True
-    print("Table Eager")
-    benchmark_and_profile(eager_func, test_case, tensors, table, trace_dir="./.log_eager")
-    print("Table Compiled")
-    benchmark_and_profile(compiled_func, test_case, tensors, table, trace_dir="./.log_compiled")
+        # Compiled function (with torch.compile)
+        compiled_func = torch.compile(run_sparse_einsum)
 
-    table = False
-    print("Binary Search Eager")
-    benchmark_and_profile(eager_func, test_case, tensors, table, trace_dir="./.log_eager")
-    print("Binary Search Compiled")
-    benchmark_and_profile(compiled_func, test_case, tensors, table, trace_dir="./.log_compiled")
+        # Run benchmarks
+        table = True
+        print("Table Eager")
+        benchmark_and_profile(eager_func, test_case, tensors, table, trace_dir="./.log_eager")
+        print("Table Compiled")
+        benchmark_and_profile(compiled_func, test_case, tensors, table, trace_dir="./.log_compiled")
 
-    # print(f"Eager mode:    min = {eager_min*1e3:.3f} ms, avg = {eager_avg*1e3:.3f} ms")
-    # print(f"torch.compile: min = {compiled_min*1e3:.3f} ms, avg = {compiled_avg*1e3:.3f} ms")
+        table = False
+        print("Binary Search Eager")
+        benchmark_and_profile(eager_func, test_case, tensors, table, trace_dir="./.log_eager")
+        print("Binary Search Compiled")
+        benchmark_and_profile(compiled_func, test_case, tensors, table, trace_dir="./.log_compiled")
+
+        print("\n")
+
+        # print(f"Eager mode:    min = {eager_min*1e3:.3f} ms, avg = {eager_avg*1e3:.3f} ms")
+        # print(f"torch.compile: min = {compiled_min*1e3:.3f} ms, avg = {compiled_avg*1e3:.3f} ms")
