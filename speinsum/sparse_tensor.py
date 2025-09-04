@@ -167,7 +167,9 @@ class SparseTensor:
         return SparseTensor(indices=indices, values=values, dimensions=dims, dimension_mapping=mapping)
 
     @staticmethod
-    def from_dense(tensor: Tensor, formats: Sequence[DimensionFormat], sparse_rate: float = 0.8) -> SparseTensor:
+    def from_dense(
+        tensor: Tensor, formats: Sequence[DimensionFormat], sparse_rate: float = 0.8, device=torch.device("cpu")
+    ) -> SparseTensor:
         """Generate a new sparse tensor given a dense tensor and the format of each dimension.
 
         Args:

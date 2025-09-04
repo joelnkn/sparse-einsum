@@ -435,8 +435,10 @@ def sparse_einsum(equation: str, out_format: str, *tensors: SparseTensor, table=
             intersect_data[f"T{tens}_{dim}"] = tensors[tens].indices[:, dim]
 
         if table:
-            intersect_queries.append(f"{query[0]}")
-            intersect_queries.extend(f"{query[0]} == {q}" for q in query[1:])
+            if len(query) == 1:
+                intersect_queries.append(f"{query[0]}")
+            else:
+                intersect_queries.extend(f"{query[0]} == {q}" for q in query[1:])
         else:
             intersect_queries.append(" == ".join(query))
 
@@ -449,6 +451,7 @@ def sparse_einsum(equation: str, out_format: str, *tensors: SparseTensor, table=
         if table:
             # int_idx = table_intersect(intersect_query, **intersect_data)
 
+            # print("query is ", intersect_query)
             table_run, dynamic = table_intersect(intersect_query, **intersect_data)
             # move nonzero outside tiql as a hack to get around graph break errors
             if dynamic:

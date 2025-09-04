@@ -16,6 +16,10 @@ class Dimension:
     size: int
     format: DimensionFormat
 
+    # only applies to sparse dimensions
+    sorted: bool = False
+    has_duplicates: bool = True
+
     @property
     def is_sparse(self) -> bool:
         return self.format == DimensionFormat.SPARSE

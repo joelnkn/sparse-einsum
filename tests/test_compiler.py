@@ -617,7 +617,8 @@ def test_continuous_cases(equation, tensors, formats, out_format):
     # Or infer based on `equation`, for now assume same format as first tensor
     out_format = out_format * len(parse_einsum_equation(equation)[1])
 
-    result = sparse_einsum(equation, out_format, *sparse_tensors)
+    result = sparse_einsum(equation, out_format, *sparse_tensors, table=False)
+    # result = sparse_einsum(equation, out_format, *sparse_tensors, table=True)
     expected = torch.einsum(equation, *tensors)
 
     assert torch.allclose(
